@@ -3,6 +3,7 @@ import urllib.request
 import bs4 as bs
 import json
 import pytz
+import argparse
 from datetime import datetime
 from collections import OrderedDict
 from time import sleep
@@ -15,11 +16,12 @@ current_time = our_timezone.localize(current_date)
 timezone_of_API = pytz.timezone('US/Eastern')
 
 
-def search_year_schedule():
+def search_year_schedule(number_of_games):
     week_ids = {}
     url = "https://fbschedules.com/college-football-schedule/"
     init_html = get_resp_from_url(url, "html")
     weeks_options = init_html.find("select", {'name': 'select-week-menu'}).findAll("option")
+    games_to_output = []
 
     for option in weeks_options:
         all_games_for_week = scrape_week_info_from_web_page(option['value'])
@@ -30,10 +32,16 @@ def search_year_schedule():
             # I don't know enough about how this list works that there needs to be a [0] here.
             # Something to learn about later. I think it's because it's for the [0] date.
             # If other dates were in it, I guess they'd be at other indexes
-            return list(all_games_for_week.values())[0]
-            # Need to revisit purpose of this. This seems to be more formatting?
-            # But not sure if there needs to be formatting?
-            # next_game_obj = get_next_game_from_week_obj_test(all_games_for_week)
+            # games_to_output.append(list(all_games_for_week.values())[0])
+
+            # I believe this takes the dict, parses, and then puts in a list
+            games_from_week_parsed = get_next_game_from_week_obj_test(all_games_for_week)
+            # I feel like in python you should be able to do this in one line, but I can't seem to figure it out.
+            # Anyway store in print list from list of games
+            for game in games_from_week_parsed:
+                games_to_output.append(game)
+            if len(games_to_output) >= number_of_games:
+                return games_to_output
             # if next_game_obj != 0:
             # return next_game_obj
     return 0
@@ -91,6 +99,8 @@ def scrape_week_info_from_web_page(week_id):
 def extract_gamestr_from_tbody(tbody):
     games_lol = []
     tr_list = tbody.findAll("tr")
+    # If you look closely at the URL above it's only fbs, so it won't show fcs games.
+    # Need to look at it more later if we want fcs too
     for game in tr_list:
         # This is probably brittle and might need cleaning up
         game_team_one = game.findAll("span", class_="school-name-content")[0]
@@ -168,18 +178,30 @@ def get_next_game_from_week_obj_test(week_info):
     todays_date = current_date.date()
     upcoming_games = []
 
-    print("DATES LIST: " + str(dates_list))
+    # print("DATES LIST: " + str(dates_list))
     for date in dates_list:
-        print("Single date: " + str(date))
+        # print("Single date: " + str(date))
         if date.date() >= todays_date:
             games_list = week_info[date]
-            print("Game List: " + str(games_list))
-            for game in games_list:
+            # print("Game List: " + str(games_list))
+            for game_attribute in games_list:
                 # This is slightly overkill, however, I think we might need the full day +
                 # time of day later, so I'm keeping it here. Given above check we should be on the date or later though.
-                game_time = datetime.combine(date.date(), parse_textual_time(game[1]).time(), timezone_of_API)
+                if game_attribute[1].find('Time') >= 0:
+                    # This seems to be setting it to 23:04 for... reasons? At least it does when combined below
+                    # IDK why. Should still be ok tho.
+                    # Anyway, this should be late enough in the day to signify weirdness which is what we want
+                    game_attribute[1] = "11:59PM"
+                if game_attribute[1].find('or') >= 0:
+                    # TODO handle this case better later when the time has an or.
+                    game_attribute[1] = "11:59PM"
+
+                game_time = datetime.combine(date.date(), parse_textual_time(game_attribute[1]).time(), timezone_of_API)
+                # Set the full day/time
+                game_attribute[1] = game_time
                 if game_time > current_time:
-                    upcoming_games.append(game)
+
+                    upcoming_games.append(game_attribute)
 
     return upcoming_games
 
@@ -196,13 +218,22 @@ def pretty_print_game_obj(game):
 
 def print_next_games(number_of_games_to_print, games):
     print("NEXT GAMES UP ARE....")
+    i = 0
     for game in games[:number_of_games_to_print]:
+        i += 1
+        print("************************************GAME NO: " + str(i) + "********************************************")
         pretty_print_game_obj(game)
 
 
-games_to_output = search_year_schedule()
+parser = argparse.ArgumentParser("Next Games Input")
+parser.add_argument("--num",
+                    help="This is how many games you'd like the program to show. Note that this is not conscious of "
+                         "days, so it will go past the current week if you ask for more games than left this week",
+                    type=int, default=5)
+args = parser.parse_args()
+print("Num of games to display: " + str(args.num))
+games_to_output = search_year_schedule(args.num)
 if len(games_to_output) != 0:
-    # TODO pull this number from command line
-    print_next_games(10, games_to_output)
+    print_next_games(15, games_to_output)
 else:
     print("There are no more upcoming games for this season, sorry! Hopefully basketball is ok this year?")
